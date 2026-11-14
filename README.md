@@ -66,7 +66,8 @@ may show a Play Protect warning for builds distributed outside the Play Store.
 # Install engine dependencies once (desktop engine)
 npm install --omit=dev
 
-# Install Flutter dependencies (Flutter 3.47+ recommended)
+# Install Flutter dependencies (Flutter 3.47.x tested; Flutter 3.50 requires
+# AGP 9, which the current flutter_inappwebview stable does not support yet)
 flutter pub get
 
 # Desktop

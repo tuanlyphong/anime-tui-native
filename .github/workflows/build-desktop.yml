@@ -43,9 +43,12 @@ jobs:
         with:
           node-version: "20"
 
+      # Keep CI on the same Flutter line as the Android build; Flutter 3.50
+      # requires AGP 9, which the WebView plugin does not support yet.
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
+          flutter-version: "3.47.9"
           channel: stable
           cache: true
 

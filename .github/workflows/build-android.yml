@@ -28,9 +28,12 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      # Flutter 3.50 requires AGP 9, which flutter_inappwebview 6.1.5 does not
+      # support yet (fixed only in the 6.2 betas). Stay on the tested 3.47.x.
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
+          flutter-version: "3.47.9"
           channel: stable
           cache: true
 
