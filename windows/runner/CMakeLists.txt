@@ -1,56 +1,40 @@
-# Windows desktop application.
+cmake_minimum_required(VERSION 3.14)
+project(runner LANGUAGES CXX)
 
-cmake_minimum_required(VERSION 3.23)
-
-project(anime_tui_native CXX)
-
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-# Find the Flutter Windows SDK.
-# The Flutter project should be built with:
-#   flutter build windows
-# The Flutter SDK provides the engine and embedder.
-find_path(FLUTTER_INCLUDE_DIR
-    NAMES flutter/flutter_window.h
-    PATHS "$ENV{FLUTTER_ROOT}/_internal/Framework"
-    PATHS "$ENV{FLUTTER_ROOT}/bin/cache/artifacts/engine/windows"
-    PATHS "$ENV{FLUTTER_ROOT}/lib/Flutter"
-    DOC "Flutter Windows SDK include directory"
+# Define the application target. To change its name, change BINARY_NAME in the
+# top-level CMakeLists.txt, not the value here, or `flutter run` will no longer
+# work.
+#
+# Any new source files that you add to the application should be added here.
+add_executable(${BINARY_NAME} WIN32
+  "flutter_window.cpp"
+  "main.cpp"
+  "utils.cpp"
+  "win32_window.cpp"
+  "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"
+  "Runner.rc"
+  "runner.exe.manifest"
 )
 
-find_library(FLUTTER_LIBRARY
-    NAMES flutter
-    PATHS "$ENV{FLUTTER_ROOT}/_internal/Framework"
-    PATHS "$ENV{FLUTTER_ROOT}/bin/cache/artifacts/engine/windows"
-    PATHS "$ENV{FLUTTER_ROOT}/lib/Flutter"
-    DOC "Flutter Windows SDK library"
-)
+# Apply the standard set of build settings. This can be removed for applications
+# that need different build settings.
+apply_standard_settings(${BINARY_NAME})
 
-add_executable(anime_tui_native
-    ${CMAKE_CURRENT_LIST_DIR}/flutter_window.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/runner/main.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/runner/win32_window.cpp
-)
+# Add preprocessor definitions for the build version.
+target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION=\"${FLUTTER_VERSION}\"")
+target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION_MAJOR=${FLUTTER_VERSION_MAJOR}")
+target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION_MINOR=${FLUTTER_VERSION_MINOR}")
+target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION_PATCH=${FLUTTER_VERSION_PATCH}")
+target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION_BUILD=${FLUTTER_VERSION_BUILD}")
 
-target_include_directories(anime_tui_native PRIVATE
-    ${FLUTTER_INCLUDE_DIR}
-    ${CMAKE_CURRENT_LIST_DIR}
-)
+# Disable Windows macros that collide with C++ standard library functions.
+target_compile_definitions(${BINARY_NAME} PRIVATE "NOMINMAX")
 
-target_link_libraries(anime_tui_native PRIVATE
-    flutter
-    winmm
-    ole32
-    rpcrt4
-    user32
-    gdi32
-    comdlg32
-    shell32
-    shlwapi
-    urlmon
-)
+# Add dependency libraries and include directories. Add any application-specific
+# dependencies here.
+target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app)
+target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib")
+target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 
-# Enable C++17 and warning-free compilation.
-target_compile_features(anime_tui_native PRIVATE cxx_std_20)
-target_compile_options(anime_tui_native PRIVATE /W4 /WX)
+# Run the Flutter tool portions of the build. This must not be removed.
+add_dependencies(${BINARY_NAME} flutter_assemble)

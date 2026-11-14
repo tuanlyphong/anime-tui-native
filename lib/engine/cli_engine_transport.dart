@@ -7,6 +7,7 @@ import '../core/logging/app_logger.dart';
 import 'engine_command.dart';
 import 'engine_config.dart';
 import 'engine_transport.dart';
+import 'java_runtime.dart';
 import 'models.dart';
 
 /// Launches one `node anime.js <command>` process per request.
@@ -103,12 +104,20 @@ class CliEngineTransport implements EngineTransport {
       },
     );
 
+    // Broadcast so callers (and any future logging tap) may listen more
+    // than once without tripping "Stream has already been listened to".
+    // EngineClient still attaches its single listener immediately after
+    // start() returns, before the engine produces any output, so no early
+    // lines are lost and the pipe is drained concurrently with the process
+    // (waiting for exitCode before draining would risk a pipe stall).
     final stdout = process.stdout
         .transform(const Utf8Decoder(allowMalformed: true))
-        .transform(const LineSplitter());
+        .transform(const LineSplitter())
+        .asBroadcastStream();
     final stderr = process.stderr
         .transform(const Utf8Decoder(allowMalformed: true))
-        .transform(const LineSplitter());
+        .transform(const LineSplitter())
+        .asBroadcastStream();
 
     final exitCode = process.exitCode.then((code) {
       _live.remove(id);
@@ -140,6 +149,44 @@ class CliEngineTransport implements EngineTransport {
     String id,
     EngineCommand command,
   ) async {
+    // Dart's Process.kill only terminates the direct child. The engine starts
+    // mpv and Java descendants, so Windows needs taskkill /T to stop the whole
+    // tree; killing Node alone would leave a player running.
+    if (Platform.isWindows) {
+      _logger.warning(
+        'Stopping engine command tree',
+        context: {'id': id, 'command': command.label},
+      );
+      if (process.pid > 0) {
+        try {
+          await Process.run(
+            'taskkill',
+            <String>['/PID', '${process.pid}', '/T', '/F'],
+            runInShell: false,
+            stdoutEncoding: utf8,
+            stderrEncoding: utf8,
+          ).timeout(const Duration(seconds: 5));
+        } on Object catch (error) {
+          _logger.warning(
+            'taskkill failed; falling back to Process.kill',
+            error: error,
+            context: {'id': id, 'pid': process.pid},
+          );
+          try {
+            process.kill(ProcessSignal.sigkill);
+          } on Object {
+            // Process may already be gone.
+          }
+        }
+      }
+      await Future.any(<Future<void>>[
+        process.exitCode.then((_) {}),
+        Future<void>.delayed(const Duration(seconds: 3)),
+      ]);
+      _live.remove(id);
+      return;
+    }
+
     var exited = false;
     unawaited(process.exitCode.then(
       (_) {
@@ -206,6 +253,8 @@ class CliEngineTransport implements EngineTransport {
       final result = await Process.run(
         config.nodeExecutable,
         <String>['--version'],
+        environment: config.environment,
+        includeParentEnvironment: true,
         runInShell: false,
         stdoutEncoding: utf8,
         stderrEncoding: utf8,
@@ -229,9 +278,39 @@ class CliEngineTransport implements EngineTransport {
         );
       }
 
+      // Surface a Java mismatch during startup/settings tests instead of
+      // letting playback fail later with UnsupportedClassVersionError.
+      String? javaVersion;
+      String? javaWarning;
+      final jar = config.environment['ABYSS_DL_JAR']?.trim();
+      if (jar != null && jar.isNotEmpty && File(jar).existsSync()) {
+        final javaMajor = config.javaMajorVersion;
+        if (config.javaExecutable == null) {
+          javaWarning = 'Java 21+ not found (abyss-dl.jar needs 21+)';
+        } else if (javaMajor != null &&
+            javaMajor < JavaRuntime.minimumMajorVersion) {
+          javaWarning =
+              'Java $javaMajor is too old for abyss-dl.jar (needs 21+)';
+        } else {
+          javaVersion = config.javaVersion ?? javaMajor?.toString();
+        }
+        if (javaWarning != null) {
+          _logger.warning(
+            'Configured Java runtime cannot run abyss-dl.jar',
+            context: {
+              'java': config.javaExecutable ?? 'not found',
+              'javaMajor': config.javaMajorVersion ?? 'unknown',
+              'required': JavaRuntime.minimumMajorVersion,
+            },
+          );
+        }
+      }
+
       return EngineHealth.ready(
         nodeVersion: version.isEmpty ? 'unknown' : version,
         enginePath: config.scriptPath,
+        javaVersion: javaVersion,
+        warning: javaWarning,
       );
     } on TimeoutException {
       return EngineHealth.unavailable(

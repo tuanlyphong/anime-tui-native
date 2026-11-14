@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
 import '../engine/models.dart';
@@ -147,7 +148,8 @@ class _HistoryPageState extends State<HistoryPage> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Export history'),
-        content: const Text('Save the exported file to another device (USB, email, etc.)'),
+        content: const Text(
+            'Save the exported file to another device (USB, email, etc.)'),
         actions: [
           OutlinedButton(
             onPressed: () => Navigator.of(context).pop(null),
@@ -179,29 +181,86 @@ class _HistoryPageState extends State<HistoryPage> {
   }
 
   Future<void> _import(BuildContext context) async {
-    final result = await showDialog<String>(
+    final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Import history'),
-        content: const Text('Select a history file from another device to merge (no conflicts)'),
+        content: const Text(
+            'Select a history JSON file to merge with the current history.'),
         actions: [
           OutlinedButton(
-            onPressed: () => Navigator.of(context).pop(null),
+            onPressed: () => Navigator.of(context).pop(false),
             child: const Text('Cancel'),
           ),
           FilledButton(
-            onPressed: () => Navigator.of(context).pop(AppPaths.historyFile),
+            onPressed: () => Navigator.of(context).pop(true),
             child: const Text('Select file'),
           ),
         ],
       ),
     );
-    if (result == null) return;
+    if (confirmed != true || !context.mounted) return;
+
+    const typeGroup = XTypeGroup(
+      label: 'History JSON',
+      extensions: <String>['json'],
+      mimeTypes: <String>[
+        'application/json',
+        'text/json',
+        'text/plain',
+        'application/octet-stream',
+      ],
+      uniformTypeIdentifiers: <String>['public.json'],
+    );
+
+    XFile? file;
+    try {
+      file = await openFile(
+        acceptedTypeGroups: const <XTypeGroup>[typeGroup],
+      );
+    } catch (error) {
+      if (!context.mounted) return;
+      _showMessage(context, 'Could not open the file picker: $error');
+      return;
+    }
+    if (file == null || !context.mounted) return;
+
+    String data;
+    try {
+      data = await file.readAsString();
+    } catch (error) {
+      if (!context.mounted) return;
+      _showMessage(context, 'Could not read the selected file: $error');
+      return;
+    }
     if (!context.mounted) return;
-    final count = await widget.history.importHistory(result);
+
+    ({int imported, int total}) result;
+    try {
+      result = await widget.history.importHistoryContent(data);
+    } on Object catch (error) {
+      if (!context.mounted) return;
+      _showMessage(context, 'Import failed: $error');
+      return;
+    }
     if (!context.mounted) return;
+    if (result.imported == 0) {
+      _showMessage(
+        context,
+        'No valid history entries found in the selected file.',
+      );
+      return;
+    }
+    _showMessage(
+      context,
+      'Imported ${result.imported} entries '
+      '(${result.total} total after merge).',
+    );
+  }
+
+  void _showMessage(BuildContext context, String message) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text('History imported and merged: $count titles'),
+      content: Text(message),
       behavior: SnackBarBehavior.floating,
     ));
   }
@@ -252,21 +311,27 @@ class _HistoryTile extends StatelessWidget {
                           Icon(Icons.playlist_play,
                               size: 13, color: scheme.onSurfaceVariant),
                           const SizedBox(width: 4),
-                          Text(
-                            entry.latestEpisode,
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodySmall
-                                ?.copyWith(color: scheme.onSurfaceVariant),
+                          Flexible(
+                            child: Text(
+                              entry.latestEpisode,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(color: scheme.onSurfaceVariant),
+                            ),
                           ),
                           const SizedBox(width: 10),
                         ],
-                        StatusPill(
-                          label: entry.completed ? 'Completed' : 'In progress',
-                          color: entry.completed
-                              ? scheme.primary
-                              : scheme.tertiary,
-                        ),
+                        if (MediaQuery.sizeOf(context).width >= 600)
+                          StatusPill(
+                            label:
+                                entry.completed ? 'Completed' : 'In progress',
+                            color: entry.completed
+                                ? scheme.primary
+                                : scheme.tertiary,
+                          ),
                       ],
                     ),
                   ],

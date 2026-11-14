@@ -31,6 +31,9 @@ class AppSettings {
   final String player;
 
   factory AppSettings.defaults() {
+    // Android uses the built-in mobile engine; probing desktop engine, Node,
+    // Java, and jar paths is unnecessary and noisy.
+    if (Platform.isAndroid || Platform.isIOS) return const AppSettings();
     final env = Platform.environment;
     return AppSettings(
       enginePath: env['ANIME_TUI_ENGINE_PATH']?.trim().isNotEmpty == true
@@ -39,7 +42,9 @@ class AppSettings {
       nodeExecutable: env['ANIME_TUI_NODE']?.trim().isNotEmpty == true
           ? env['ANIME_TUI_NODE']!.trim()
           : 'node',
-      abyssJar: env['ABYSS_DL_JAR'] ?? '',
+      abyssJar: env['ABYSS_DL_JAR']?.trim().isNotEmpty == true
+          ? env['ABYSS_DL_JAR']!.trim()
+          : discoverAbyssJarPath(),
       proxy: env['ANIME_TUI_PROXY'] ?? '',
       player: env['PLAYER'] ?? 'mpv',
       quality:
@@ -55,15 +60,29 @@ class AppSettings {
         value is num ? value.toInt() : int.tryParse('$value') ?? fallback;
     bool boolValue(Object? value, bool fallback) =>
         value is bool ? value : fallback;
+    // An empty persisted value must fall back to the discovered default, not
+    // pin the field to an empty string forever.
+    String? nonEmpty(Object? value) {
+      if (value is! String) return null;
+      final trimmed = value.trim();
+      return trimmed.isEmpty ? null : trimmed;
+    }
+
+    // A settings file copied from another machine (or an older install) may
+    // point at an engine/jar that no longer exists. Prefer the built-in copy
+    // discovered next to the executable instead of starting up broken.
+    String pathOrDefault(String? persisted, String discovered) {
+      final value = nonEmpty(persisted);
+      if (value == null) return discovered;
+      return File(value).existsSync() ? value : discovered;
+    }
 
     return AppSettings(
       enginePath:
-          (json['enginePath'] as String?)?.trim() ?? defaults.enginePath,
+          pathOrDefault(json['enginePath'] as String?, defaults.enginePath),
       nodeExecutable:
-          (json['nodeExecutable'] as String?)?.trim().isNotEmpty == true
-              ? (json['nodeExecutable'] as String).trim()
-              : defaults.nodeExecutable,
-      workingDirectory: (json['workingDirectory'] as String?)?.trim() ?? '',
+          nonEmpty(json['nodeExecutable']) ?? defaults.nodeExecutable,
+      workingDirectory: nonEmpty(json['workingDirectory']) ?? '',
       networkTimeoutSeconds: intValue(
         json['networkTimeoutSeconds'],
         defaults.networkTimeoutSeconds,
@@ -75,11 +94,12 @@ class AppSettings {
         json['progressivePlayback'],
         defaults.progressivePlayback,
       ),
-      abyssJar: (json['abyssJar'] as String?) ?? defaults.abyssJar,
-      proxy: (json['proxy'] as String?) ?? defaults.proxy,
-      player: (json['player'] as String?)?.trim().isNotEmpty == true
-          ? (json['player'] as String).trim()
-          : defaults.player,
+      abyssJar: pathOrDefault(
+        json['abyssJar'] as String?,
+        defaults.abyssJar,
+      ),
+      proxy: nonEmpty(json['proxy']) ?? defaults.proxy,
+      player: nonEmpty(json['player']) ?? defaults.player,
     );
   }
 
@@ -127,17 +147,52 @@ class AppSettings {
   /// the UI then shows the "configure the engine" state instead of silently
   /// spawning a nonexistent process.
   static String discoverEnginePath() {
+    if (Platform.isAndroid || Platform.isIOS) return '';
     final env = Platform.environment['ANIME_TUI_ENGINE_PATH'];
     if (env != null && env.trim().isNotEmpty) return env.trim();
 
     final cwd = Directory.current.path;
     final executableDir = File(Platform.resolvedExecutable).parent.path;
+    // Built-in engine: bundled with the project (no env var needed), then
+    // next to the packaged executable for desktop installs. Release bundles
+    // place the engine in an `engine/` directory beside the binary.
     final candidates = <String>[
+      '$executableDir${Platform.pathSeparator}engine${Platform.pathSeparator}anime.js',
+      '$executableDir${Platform.pathSeparator}..${Platform.pathSeparator}Resources${Platform.pathSeparator}engine${Platform.pathSeparator}anime.js',
+      '$cwd${Platform.pathSeparator}engine${Platform.pathSeparator}anime.js',
       '$cwd${Platform.pathSeparator}anime.js',
+      '$cwd${Platform.pathSeparator}..${Platform.pathSeparator}anime.js',
+      '$executableDir${Platform.pathSeparator}anime.js',
+      '$executableDir${Platform.pathSeparator}..${Platform.pathSeparator}Resources${Platform.pathSeparator}anime.js',
       '$cwd${Platform.pathSeparator}..${Platform.pathSeparator}anime-tui-cross${Platform.pathSeparator}anime.js',
       '${Directory(cwd).parent.path}${Platform.pathSeparator}anime-tui-cross${Platform.pathSeparator}anime.js',
-      '$executableDir${Platform.pathSeparator}anime.js',
-      '$executableDir${Platform.pathSeparator}..${Platform.pathSeparator}anime.js',
+    ];
+
+    for (final candidate in candidates) {
+      final normalized = _normalize(candidate);
+      if (File(normalized).existsSync()) return normalized;
+    }
+    return '';
+  }
+
+  static String discoverAbyssJarPath() {
+    if (Platform.isAndroid || Platform.isIOS) return '';
+    final env = Platform.environment['ABYSS_DL_JAR'];
+    if (env != null && env.trim().isNotEmpty) return env.trim();
+
+    final cwd = Directory.current.path;
+    final executableDir = File(Platform.resolvedExecutable).parent.path;
+    final candidates = <String>[
+      '$executableDir${Platform.pathSeparator}engine${Platform.pathSeparator}abyss-dl.jar',
+      '$executableDir${Platform.pathSeparator}..${Platform.pathSeparator}Resources${Platform.pathSeparator}engine${Platform.pathSeparator}abyss-dl.jar',
+      '$cwd${Platform.pathSeparator}engine${Platform.pathSeparator}abyss-dl.jar',
+      '$cwd${Platform.pathSeparator}abyss-dl.jar',
+      '$cwd${Platform.pathSeparator}..${Platform.pathSeparator}abyss-dl.jar',
+      '$cwd${Platform.pathSeparator}lib${Platform.pathSeparator}abyss-dl.jar',
+      '$cwd${Platform.pathSeparator}assets${Platform.pathSeparator}abyss-dl.jar',
+      '$executableDir${Platform.pathSeparator}abyss-dl.jar',
+      '$executableDir${Platform.pathSeparator}..${Platform.pathSeparator}Resources${Platform.pathSeparator}abyss-dl.jar',
+      '${Directory(cwd).parent.path}${Platform.pathSeparator}anime-tui${Platform.pathSeparator}abyss-dl.jar',
     ];
 
     for (final candidate in candidates) {

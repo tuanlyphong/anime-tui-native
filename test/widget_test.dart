@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:anime_tui_native/app/app.dart';
 import 'package:anime_tui_native/app/app_settings.dart';
 import 'package:anime_tui_native/core/logging/app_logger.dart';
 import 'package:anime_tui_native/engine/models.dart';
 import 'package:anime_tui_native/state/app_controller.dart';
+import 'package:anime_tui_native/ui/chrome.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -86,6 +89,82 @@ void main() {
     expect(find.textContaining('Engine not configured'), findsWidgets);
     expect(find.text('Open settings'), findsOneWidget);
 
+    await tester.pumpWidget(const SizedBox.shrink());
+    controller.dispose();
+  });
+
+  testWidgets('narrow screens use bottom navigation and no desktop chrome',
+      (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(420, 860);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final engine = FakeEngine();
+    final controller = AppController.create(
+      engine: engine,
+      settings: const AppSettings(enginePath: '/tmp/anime.js'),
+      store: MemorySettingsStore(),
+      logger: AppLogger(maxEntries: 100),
+    );
+    await controller.initialize();
+
+    await tester.pumpWidget(AnimeTuiApp(controller: controller));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(NavigationBar), findsOneWidget);
+    expect(find.byType(AppSidebar), findsNothing);
+    expect(find.text('Search results'), findsOneWidget);
+    expect(find.text('No active playback'), findsNothing);
+
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Continue watching'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    controller.dispose();
+  });
+
+  testWidgets('narrow screens show the playback bar as soon as play starts',
+      (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(420, 860);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final gate = Completer<void>();
+    final engine = FakeEngine()..playbackGate = gate;
+    final controller = AppController.create(
+      engine: engine,
+      settings: const AppSettings(enginePath: '/tmp/anime.js'),
+      store: MemorySettingsStore(),
+      logger: AppLogger(maxEntries: 100),
+    );
+    await controller.initialize();
+
+    await tester.pumpWidget(AnimeTuiApp(controller: controller));
+    await tester.pumpAndSettle();
+    expect(find.byType(PlaybackBar), findsNothing);
+
+    unawaited(controller.playback.play(
+      anime: const AnimeSummary(
+        title: 'Naruto',
+        url: 'https://example.com/phim/naruto',
+      ),
+      episode: const Episode(
+        title: 'Tập 1',
+        url: 'https://example.com/tap-1.html',
+      ),
+    ));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(find.byType(PlaybackBar), findsOneWidget);
+    expect(find.text('Playing'), findsOneWidget);
+
+    gate.complete();
+    await tester.pumpAndSettle();
     await tester.pumpWidget(const SizedBox.shrink());
     controller.dispose();
   });

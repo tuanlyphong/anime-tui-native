@@ -1,11 +1,34 @@
 import 'dart:io';
 
+import 'package:path_provider/path_provider.dart';
+
 /// Platform-correct locations for configuration and state files.
 ///
-/// The app deliberately avoids `path_provider` so the whole data layer stays
-/// testable in plain Dart and the desktop build has one less plugin.
+/// Desktop paths are derived from the environment. Android uses the app's
+/// private support directory, which requires an async lookup; call
+/// [initialize] once before reading any path on mobile.
 abstract final class AppPaths {
   static const String appDirectoryName = 'anime-tui-native';
+
+  static bool _initialized = false;
+  static String? _mobileSupportDirectory;
+
+  /// Resolve platform directories that require plugins. Safe to call on every
+  /// platform; desktop is a no-op.
+  static Future<void> initialize() async {
+    if (_initialized) return;
+    _initialized = true;
+    if (!Platform.isAndroid && !Platform.isIOS) return;
+    try {
+      final directory = await getApplicationSupportDirectory();
+      _mobileSupportDirectory = directory.path;
+    } on Object {
+      // Keep the HOME-based fallback usable if the plugin is unavailable.
+      _mobileSupportDirectory = null;
+    }
+  }
+
+  static bool get _isMobile => Platform.isAndroid || Platform.isIOS;
 
   static String get _home {
     final env = Platform.environment;
@@ -13,6 +36,10 @@ abstract final class AppPaths {
   }
 
   static String get _configHome {
+    if (_isMobile) {
+      final base = _mobileSupportDirectory ?? _home;
+      return '$base${Platform.pathSeparator}config';
+    }
     final env = Platform.environment;
     if (Platform.isWindows) {
       return env['APPDATA'] ?? '$_home\\AppData\\Roaming';
@@ -24,6 +51,10 @@ abstract final class AppPaths {
   }
 
   static String get _stateHome {
+    if (_isMobile) {
+      final base = _mobileSupportDirectory ?? _home;
+      return '$base${Platform.pathSeparator}state';
+    }
     final env = Platform.environment;
     if (Platform.isWindows) {
       return env['LOCALAPPDATA'] ?? '$_home\\AppData\\Local';
@@ -38,7 +69,7 @@ abstract final class AppPaths {
   static String get configDirectory =>
       '$_configHome${Platform.pathSeparator}$appDirectoryName';
 
-  /// Directory that holds the rolling log file.
+  /// Directory that holds the rolling log file and local history.
   static String get stateDirectory =>
       '$_stateHome${Platform.pathSeparator}$appDirectoryName';
 
@@ -51,6 +82,10 @@ abstract final class AppPaths {
   /// File that stores watch history (exported/imported manually).
   static String get historyFile =>
       '$stateDirectory${Platform.pathSeparator}history.json';
+
+  /// History owned by the Android engine.
+  static String get mobileHistoryFile =>
+      '$stateDirectory${Platform.pathSeparator}mobile-history.json';
 
   /// Creates [directory] (and parents) if needed. Returns null on failure so
   /// callers can log a warning instead of crashing during startup.

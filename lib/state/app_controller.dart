@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
@@ -6,6 +7,7 @@ import '../core/logging/app_logger.dart';
 import '../engine/cli_engine_transport.dart';
 import '../engine/engine_client.dart';
 import '../engine/engine_config.dart';
+import '../engine/mobile/mobile_engine.dart';
 import '../engine/models.dart';
 import '../app/app_settings.dart';
 import 'browser_controller.dart';
@@ -23,8 +25,8 @@ class AppController extends ChangeNotifier {
     required this.settings,
     required this.store,
     required this.logger,
-  })  : _engine = engine,
-        config = EngineConfig.fromSettings(settings) {
+    required this.config,
+  }) : _engine = engine {
     browser = BrowserController(engine: engine, logger: logger);
     playback = PlaybackController(engine: engine, logger: logger);
     history = HistoryController(engine: engine, logger: logger);
@@ -37,20 +39,33 @@ class AppController extends ChangeNotifier {
     AnimeEngine? engine,
   }) {
     final log = logger ?? AppLogger.instance;
-    final effectiveEngine = engine ??
-        EngineClient(
-          transport: CliEngineTransport(
-            config: EngineConfig.fromSettings(settings),
-            logger: log,
-          ),
-          config: EngineConfig.fromSettings(settings),
-          logger: log,
-        );
+    final mobile = Platform.isAndroid || Platform.isIOS;
+
+    EngineConfig? config;
+    final AnimeEngine effectiveEngine;
+    if (engine != null) {
+      config = mobile ? null : EngineConfig.fromSettings(settings);
+      effectiveEngine = engine;
+    } else if (mobile) {
+      effectiveEngine = MobileEngine(logger: log);
+    } else {
+      // Build the configuration once: constructing it runs Java discovery, and
+      // the transport and client must share exactly the same environment.
+      final nextConfig = EngineConfig.fromSettings(settings);
+      config = nextConfig;
+      effectiveEngine = EngineClient(
+        transport: CliEngineTransport(config: nextConfig, logger: log),
+        config: nextConfig,
+        logger: log,
+      );
+    }
+
     return AppController._(
       engine: effectiveEngine,
       settings: settings,
       store: store,
       logger: log,
+      config: config,
     );
   }
 
@@ -58,7 +73,7 @@ class AppController extends ChangeNotifier {
   final AppLogger logger;
 
   AppSettings settings;
-  EngineConfig config;
+  EngineConfig? config;
 
   AnimeEngine _engine;
 
@@ -109,6 +124,9 @@ class AppController extends ChangeNotifier {
   }
 
   Future<EngineHealth> testSettings(AppSettings candidate) async {
+    if (Platform.isAndroid || Platform.isIOS) {
+      return _engine.checkHealth();
+    }
     final probe = CliEngineTransport(
       config: EngineConfig.fromSettings(candidate),
       logger: logger,
@@ -128,12 +146,20 @@ class AppController extends ChangeNotifier {
     try {
       await store.save(next);
       settings = next;
-      config = EngineConfig.fromSettings(next);
+
+      // The mobile engine has no paths or player configuration to reload.
+      if (Platform.isAndroid || Platform.isIOS) {
+        _health = await _engine.checkHealth();
+        return;
+      }
+
+      final nextConfig = EngineConfig.fromSettings(next);
+      config = nextConfig;
 
       final previous = _engine;
       final nextEngine = EngineClient(
-        transport: CliEngineTransport(config: config, logger: logger),
-        config: config,
+        transport: CliEngineTransport(config: nextConfig, logger: logger),
+        config: nextConfig,
         logger: logger,
       );
 

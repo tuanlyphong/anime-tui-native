@@ -10,6 +10,7 @@ enum EngineErrorKind {
   notConfigured,
   nodeNotFound,
   spawnFailed,
+  network,
   timeout,
   cancelled,
   busy,
@@ -57,6 +58,16 @@ class EngineException implements Exception {
         command: command,
       );
     }
+    if (error is SocketException) {
+      return EngineException(
+        EngineErrorKind.network,
+        'Could not reach the site: ${error.message}',
+        details: error.toString(),
+        cause: error,
+        stackTrace: stackTrace,
+        command: command,
+      );
+    }
     if (error is TimeoutException) {
       return EngineException(
         EngineErrorKind.timeout,
@@ -84,6 +95,8 @@ class EngineException implements Exception {
         EngineErrorKind.nodeNotFound =>
           'Node.js could not be found on this computer.',
         EngineErrorKind.spawnFailed => 'The engine could not be started.',
+        EngineErrorKind.network =>
+          'The anime site could not be reached. Check your connection or VPN and try again.',
         EngineErrorKind.timeout =>
           'The engine took too long to respond. The site may be slow or blocked.',
         EngineErrorKind.cancelled => 'The request was cancelled.',
@@ -101,11 +114,13 @@ class EngineException implements Exception {
         EngineErrorKind.unsupportedPlatform =>
           'Run the app on Windows, macOS, or Linux.',
         EngineErrorKind.notConfigured =>
-          'Open Settings and select the path to anime.js, or set ANIME_TUI_ENGINE_PATH.',
+          'Open Settings to configure the engine (anime.js and, for Abyss streams, abyss-dl.jar), or set ANIME_TUI_ENGINE_PATH / ABYSS_DL_JAR.',
         EngineErrorKind.nodeNotFound =>
           'Install Node.js 18+ or set ANIME_TUI_NODE to the node executable.',
         EngineErrorKind.spawnFailed =>
           'Check the engine path and file permissions in Settings.',
+        EngineErrorKind.network =>
+          'Check the internet connection, VPN/proxy settings, and try again.',
         EngineErrorKind.timeout => 'Check your network/VPN and try again.',
         EngineErrorKind.cancelled => 'Retry the action when ready.',
         EngineErrorKind.busy => 'Wait for the running command to finish.',

@@ -55,6 +55,8 @@ class FakeEngine implements AnimeEngine {
   final List<String> calls = <String>[];
   final List<PlaybackRequest> playRequests = <PlaybackRequest>[];
   final List<Map<String, String>> historyAdds = <Map<String, String>>[];
+  final List<List<HistoryEntry>> historyImports = <List<HistoryEntry>>[];
+  final Map<String, HistoryEntry> importedHistory = <String, HistoryEntry>{};
   final Map<String, bool> completionCalls = <String, bool>{};
 
   Future<List<AnimeSummary>> Function(String query)? onSearch;
@@ -157,7 +159,13 @@ class FakeEngine implements AnimeEngine {
     if (historyError != null) throw historyError!;
     final gate = historyGate;
     if (gate != null) await gate.future;
-    return completed ? this.completed : inProgress;
+    final base = completed ? this.completed : inProgress;
+    return <HistoryEntry>[
+      ...base.where((entry) => !importedHistory.containsKey(entry.url)),
+      ...importedHistory.values.where(
+        (entry) => entry.completed == completed,
+      ),
+    ];
   }
 
   @override
@@ -195,6 +203,15 @@ class FakeEngine implements AnimeEngine {
         latestEpisode: entry.latestEpisode,
         completed: completed,
       ));
+    }
+  }
+
+  @override
+  Future<void> importHistory(List<HistoryEntry> entries) async {
+    calls.add('history-import');
+    historyImports.add(List<HistoryEntry>.of(entries));
+    for (final entry in entries) {
+      importedHistory[entry.url] = entry;
     }
   }
 

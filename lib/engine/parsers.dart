@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import '../core/errors/engine_exception.dart';
 import 'models.dart';
 
@@ -100,9 +102,10 @@ String parseStreamUrl(Iterable<String> lines) {
     );
   }
 
-  // The engine prints only the URL, but tolerate a "URL: ..." prefix in case
-  // an older/newer engine wraps it.
-  final candidate = cleaned.last;
+  // The engine may return either a raw URL or a JSON envelope:
+  // {"output": "https://...", "exit_code": 0, "error": null}
+  final candidate = _extractJsonOutput(cleaned.last.trim());
+
   final uri = Uri.tryParse(candidate);
   if (uri == null || !uri.hasScheme || candidate.contains(' ')) {
     throw EngineException(
@@ -119,6 +122,23 @@ String parseStreamUrl(Iterable<String> lines) {
     );
   }
   return candidate;
+}
+
+/// If the line is a JSON envelope emitted by the engine, extract the URL
+/// from the "output" field; otherwise treat the line as a raw URL.
+String _extractJsonOutput(String line) {
+  try {
+    final json = jsonDecode(line);
+    if (json is Map<String, dynamic> && json.containsKey('output')) {
+      final output = json['output'];
+      if (output is String && output.isNotEmpty) {
+        return output;
+      }
+    }
+  } catch (_) {
+    // Not valid JSON — treat as a raw URL.
+  }
+  return line;
 }
 
 PlaybackOutcome parsePlaybackOutcome(Iterable<String> lines) {
@@ -160,7 +180,9 @@ PlaybackStatus? parsePlaybackStatus(String raw) {
       percent: value,
     );
   }
-  if (lower.startsWith('playing ')) {
+  // The engine emits "<label> playing 50% · …" (see formatStatus in
+  // lib/playback-status.js), not "Playing <label> …". Accept both.
+  if (lower.startsWith('playing ') || lower.contains(' playing ')) {
     return PlaybackStatus(
       stage: PlaybackStage.playing,
       text: line,

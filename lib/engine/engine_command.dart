@@ -8,6 +8,7 @@ enum EngineCommandKind {
   playEpisode,
   history,
   historyAdd,
+  historyImport,
   historyComplete,
   historyUncomplete,
   abyssStream,
@@ -146,6 +147,19 @@ class EngineCommand {
       ],
       timeout: const Duration(seconds: 30),
       label: 'history-add "$title"',
+    );
+  }
+
+  factory EngineCommand.importHistory(String path) {
+    final value = path.trim();
+    if (value.isEmpty) {
+      throw ArgumentError.value(path, 'path', 'must not be empty');
+    }
+    return EngineCommand(
+      kind: EngineCommandKind.historyImport,
+      arguments: <String>['history-import', value],
+      timeout: const Duration(seconds: 60),
+      label: 'history-import',
     );
   }
 

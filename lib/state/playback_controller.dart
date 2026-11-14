@@ -18,6 +18,14 @@ enum PlaybackPhase {
   failed,
 }
 
+/// Creates a playback session without going through [AnimeEngine.play].
+///
+/// Desktop uses the engine's mpv process. Android installs a factory that
+/// opens the full-screen in-app WebView player instead.
+typedef PlaybackSessionFactory = Future<PlaybackSession> Function(
+  PlaybackRequest request,
+);
+
 /// Drives stream resolution, engine playback, and the persistent now-playing
 /// bar. mpv owns the actual video window; this controller tracks the engine
 /// process and its status output.
@@ -25,11 +33,16 @@ class PlaybackController extends ChangeNotifier {
   PlaybackController({
     required AnimeEngine engine,
     required AppLogger logger,
+    this.sessionFactory,
   })  : _engine = engine,
         _logger = logger;
 
   AnimeEngine _engine;
   final AppLogger _logger;
+
+  /// Optional UI-owned session factory. When null, the engine's `play` command
+  /// is used (desktop). Android installs a factory that opens the WebView.
+  PlaybackSessionFactory? sessionFactory;
 
   PlaybackPhase _phase = PlaybackPhase.idle;
   AnimeSummary? _anime;
@@ -101,12 +114,16 @@ class PlaybackController extends ChangeNotifier {
       _statusText = 'Starting player…';
       _notify();
 
-      final session = await _engine.play(PlaybackRequest(
+      final request = PlaybackRequest(
         streamUrl: streamUrl,
         animeUrl: anime.url,
         episodeUrl: episode.url,
         label: _playbackLabel(anime, episode),
-      ));
+      );
+      final factory = sessionFactory;
+      final session = factory != null
+          ? await factory(request)
+          : await _engine.play(request);
       if (generation != _generation || _disposed) {
         await session.stop();
         return;
@@ -114,7 +131,9 @@ class PlaybackController extends ChangeNotifier {
       _session = session;
       unawaited(_recordHistory(anime, episode));
 
-      _statusSubscription?.cancel();
+      // Await the cancel so the previous session's status events cannot
+      // interleave with the new session's starting/playing states.
+      await _statusSubscription?.cancel();
       _statusSubscription = session.statuses.listen((status) {
         if (generation != _generation || _disposed) return;
         // A late status event must not overwrite a terminal state.

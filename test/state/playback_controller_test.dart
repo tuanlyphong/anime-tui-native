@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:anime_tui_native/core/errors/engine_exception.dart';
 import 'package:anime_tui_native/core/logging/app_logger.dart';
+import 'package:anime_tui_native/engine/engine_client.dart';
 import 'package:anime_tui_native/engine/models.dart';
 import 'package:anime_tui_native/state/playback_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -107,5 +108,114 @@ void main() {
 
     expect(controller.phase, PlaybackPhase.failed);
     expect(controller.error, contains('could not open stream'));
+  });
+
+  group('playback session factory', () {
+    test('uses the injected session instead of the engine player', () async {
+      final requests = <PlaybackRequest>[];
+      final statuses = StreamController<PlaybackStatus>();
+      final result = Completer<PlaybackResult>();
+      var stopped = 0;
+
+      controller.dispose();
+      controller = PlaybackController(
+        engine: engine,
+        logger: AppLogger(maxEntries: 50),
+        sessionFactory: (request) async {
+          requests.add(request);
+          scheduleMicrotask(() {
+            statuses.add(const PlaybackStatus(
+              stage: PlaybackStage.playing,
+              text: 'Playing in WebView',
+              percent: 0.5,
+            ));
+            result.complete(
+              const PlaybackResult(outcome: PlaybackOutcome.finished),
+            );
+            statuses.close();
+          });
+          return PlaybackSession(
+            statuses: statuses.stream,
+            result: result.future,
+            stop: () async {
+              stopped++;
+            },
+          );
+        },
+      );
+
+      await controller.play(anime: anime, episode: episode);
+
+      expect(engine.playRequests, isEmpty);
+      expect(requests, hasLength(1));
+      expect(requests.single.streamUrl, engine.streamUrl);
+      expect(requests.single.animeUrl, anime.url);
+      expect(requests.single.episodeUrl, episode.url);
+      expect(requests.single.label, 'Naruto — Tập 1');
+      expect(controller.phase, PlaybackPhase.finished);
+      expect(stopped, 0);
+    });
+
+    test('stop closes the injected session', () async {
+      final statuses = StreamController<PlaybackStatus>();
+      final result = Completer<PlaybackResult>();
+      var stopped = 0;
+
+      controller.dispose();
+      controller = PlaybackController(
+        engine: engine,
+        logger: AppLogger(maxEntries: 50),
+        sessionFactory: (request) async => PlaybackSession(
+          statuses: statuses.stream,
+          result: result.future,
+          stop: () async {
+            stopped++;
+            if (!result.isCompleted) {
+              result.complete(
+                const PlaybackResult(outcome: PlaybackOutcome.stopped),
+              );
+            }
+            await statuses.close();
+          },
+        ),
+      );
+
+      final playback = controller.play(anime: anime, episode: episode);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(controller.isBusy, isTrue);
+
+      await controller.stop();
+      await playback;
+
+      expect(stopped, 1);
+      expect(controller.phase, PlaybackPhase.stopped);
+    });
+
+    test('a failed injected session surfaces its error', () async {
+      controller.dispose();
+      controller = PlaybackController(
+        engine: engine,
+        logger: AppLogger(maxEntries: 50),
+        sessionFactory: (request) async {
+          final statuses = StreamController<PlaybackStatus>();
+          unawaited(statuses.close());
+          return PlaybackSession(
+            statuses: statuses.stream,
+            result: Future<PlaybackResult>.value(
+              const PlaybackResult(
+                outcome: PlaybackOutcome.failed,
+                error: 'WebView could not load the player',
+              ),
+            ),
+            stop: () async {},
+          );
+        },
+      );
+
+      await controller.play(anime: anime, episode: episode);
+
+      expect(controller.phase, PlaybackPhase.failed);
+      expect(controller.error, contains('WebView could not load'));
+    });
   });
 }

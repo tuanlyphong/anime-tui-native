@@ -1,0 +1,21 @@
+{
+  "name": "anime_tui",
+  "version": "1.0.0",
+  "description": "",
+  "main": "anime.js",
+  "directories": {
+    "lib": "lib"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "cheerio": "^1.2.0",
+    "node-html-parser": "^8.0.3",
+    "playwright": "^1.61.0"
+  }
+}

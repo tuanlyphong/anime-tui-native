@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 
 import '../core/errors/engine_exception.dart';
@@ -112,8 +115,8 @@ class HistoryController extends ChangeNotifier {
       // Refresh both lists: the entry moves between tabs.
       await load(completed: false, force: true);
       await load(completed: true, force: true);
-      // Persist to disk
-      persist(save: true);
+      // Persist to disk.
+      await persist();
     } on Object catch (error, stackTrace) {
       _busyUrls.remove(entry.url);
       _errors[completed] = EngineException.from(error, stackTrace: stackTrace);
@@ -128,7 +131,7 @@ class HistoryController extends ChangeNotifier {
   }
 
   /// Save history to disk (called after changes).
-  Future<void> persist({bool save = true}) async {
+  Future<void> persist() async {
     final all = <HistoryEntry>[];
     for (final entries in _entries.values) {
       all.addAll(entries);
@@ -145,21 +148,67 @@ class HistoryController extends ChangeNotifier {
     return HistoryPersistence.export(path, entries: all);
   }
 
-  /// Import history from a file, merging with existing entries (no conflicts).
-  Future<int> importHistory(String path) async {
-    final mergedData = HistoryPersistence.importAndMerge(path);
-    _loadGenerations[false] = _loadGenerations[false] ?? 0 + 1;
-    _loadGenerations[true] = _loadGenerations[true] ?? 0 + 1;
-    _entries.clear();
-    final grouped = <bool, List<HistoryEntry>>{false: <HistoryEntry>[], true: <HistoryEntry>[]};
-    for (final data in mergedData) {
-      grouped[data.completed]!.add(data);
+  /// Import history from raw JSON, merging with existing entries.
+  ///
+  /// The merge goes through the active engine so it lands in the store the
+  /// engine actually reads on the next launch (`mobile-history.json` on
+  /// Android, the engine's own history file on desktop).
+  Future<({int imported, int total})> importHistoryContent(String data) async {
+    final entries = _parseEntries(data);
+    if (entries.isEmpty) {
+      return (imported: 0, total: _entryCount());
     }
-    _entries[false] = grouped[false] ?? <HistoryEntry>[];
-    _entries[true] = grouped[true] ?? <HistoryEntry>[];
-    _notify();
-    return mergedData.length;
+    await _engine.importHistory(entries);
+    await load(completed: false, force: true);
+    await load(completed: true, force: true);
+    return (imported: entries.length, total: _entryCount());
   }
+
+  /// Import history from a file path, merging with existing entries.
+  Future<({int imported, int total})> importHistory(String path) async {
+    final file = File(path);
+    if (!file.existsSync()) {
+      return (imported: 0, total: _entryCount());
+    }
+    try {
+      return await importHistoryContent(await file.readAsString());
+    } on Object catch (error, stackTrace) {
+      _logger.error(
+        'Importing history failed',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      return (imported: 0, total: _entryCount());
+    }
+  }
+
+  List<HistoryEntry> _parseEntries(String data) {
+    Object? parsed;
+    try {
+      parsed = jsonDecode(data);
+    } on FormatException {
+      return const <HistoryEntry>[];
+    }
+    if (parsed is! List) return const <HistoryEntry>[];
+
+    final entries = <HistoryEntry>[];
+    for (final item in parsed) {
+      if (item is! Map) continue;
+      try {
+        final entry = HistoryEntry.fromJson(
+          item.map((key, value) => MapEntry('$key', value)),
+        );
+        if (entry.url.isEmpty) continue;
+        entries.add(entry);
+      } on Object {
+        // Skip malformed entries; one bad row must not reject the file.
+      }
+    }
+    return entries;
+  }
+
+  int _entryCount() =>
+      _entries.values.fold(0, (total, entries) => total + entries.length);
 
   void _notify() {
     if (!_disposed) notifyListeners();

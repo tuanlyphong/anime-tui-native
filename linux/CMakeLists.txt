@@ -126,3 +126,31 @@ if(NOT CMAKE_BUILD_TYPE MATCHES "Debug")
   install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
     COMPONENT Runtime)
 endif()
+
+# Bundle the Node.js engine next to the app so a release install works
+# without ANIME_TUI_ENGINE_PATH or any manual engine configuration. The
+# engine keeps its own `lib/` and `node_modules/` layout because anime.js
+# imports them relative to itself.
+set(ENGINE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/..")
+set(ENGINE_INSTALL_DIR "${CMAKE_INSTALL_PREFIX}/engine")
+if(NOT EXISTS "${ENGINE_SOURCE_DIR}/node_modules")
+  message(FATAL_ERROR
+    "Engine dependencies are missing. Run `npm install --omit=dev` in "
+    "${ENGINE_SOURCE_DIR} before building.")
+endif()
+
+install(FILES
+  "${ENGINE_SOURCE_DIR}/anime.js"
+  "${ENGINE_SOURCE_DIR}/package.json"
+  "${ENGINE_SOURCE_DIR}/abyss-dl.jar"
+  DESTINATION "${ENGINE_INSTALL_DIR}"
+  COMPONENT Runtime)
+
+install(DIRECTORY "${ENGINE_SOURCE_DIR}/lib/"
+  DESTINATION "${ENGINE_INSTALL_DIR}/lib"
+  COMPONENT Runtime
+  FILES_MATCHING PATTERN "*.js")
+
+install(DIRECTORY "${ENGINE_SOURCE_DIR}/node_modules/"
+  DESTINATION "${ENGINE_INSTALL_DIR}/node_modules"
+  COMPONENT Runtime)

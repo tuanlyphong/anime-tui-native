@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -10,32 +11,40 @@ import 'core/utils/app_paths.dart';
 import 'state/app_controller.dart';
 
 void main() {
-  WidgetsFlutterBinding.ensureInitialized();
-
   final logger = AppLogger.instance;
 
-  FlutterError.onError = (FlutterErrorDetails details) {
-    logger.error(
-      'Flutter framework error',
-      error: details.exception,
-      stackTrace: details.stack,
-      context: {'library': details.library ?? 'unknown'},
-    );
-    if (kDebugMode) {
-      FlutterError.presentError(details);
-    }
-  };
-
-  PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {
-    logger.error('Uncaught platform error', error: error, stackTrace: stack);
-    return true;
-  };
-
-  ErrorWidget.builder =
-      (FlutterErrorDetails details) => _FatalErrorScreen(details: details);
-
+  // Initialize the binding and run the app inside the same zone. Doing
+  // `ensureInitialized()` in the root zone and `runApp()` in this one triggers
+  // Flutter's "Zone mismatch" framework error on every launch.
   runZonedGuarded(
     () async {
+      WidgetsFlutterBinding.ensureInitialized();
+
+      FlutterError.onError = (FlutterErrorDetails details) {
+        logger.error(
+          'Flutter framework error',
+          error: details.exception,
+          stackTrace: details.stack,
+          context: {'library': details.library ?? 'unknown'},
+        );
+        if (kDebugMode) {
+          FlutterError.presentError(details);
+        }
+      };
+
+      PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {
+        logger.error('Uncaught platform error',
+            error: error, stackTrace: stack);
+        return true;
+      };
+
+      ErrorWidget.builder =
+          (FlutterErrorDetails details) => _FatalErrorScreen(details: details);
+
+      // Android needs path_provider's app-support directory before the logger,
+      // settings, or history touch the filesystem. Desktop is a no-op.
+      await AppPaths.initialize();
+
       await logger.init(filePath: AppPaths.logFile);
 
       final store = FileSettingsStore(logger: logger);
@@ -58,10 +67,15 @@ void main() {
       );
 
       logger.info('Anime TUI starting', context: {
-        'platform': PlatformDispatcher.instance.platformBrightness.name,
-        'engine': settings.enginePath.isEmpty
-            ? 'not configured'
-            : settings.enginePath,
+        'platform': Platform.isAndroid ? 'android' : Platform.operatingSystem,
+        'engine': Platform.isAndroid
+            ? 'mobile WebView'
+            : settings.enginePath.isEmpty
+                ? 'not configured'
+                : settings.enginePath,
+        'java': controller.config?.javaExecutable ??
+            'Java 21+ not found (abyss-dl.jar will fail)',
+        'javaVersion': controller.config?.javaVersion ?? 'unknown',
       });
 
       runApp(AnimeTuiApp(controller: controller));

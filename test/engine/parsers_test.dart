@@ -111,6 +111,15 @@ void main() {
       expect(playing.percent, closeTo(0.4, 0.001));
     });
 
+    test('parses the real engine "<label> playing …" format', () {
+      final playing = parsePlaybackStatus(
+        'Boruto: Naruto Những Thế Hệ Kế Tiếp — Tập 001 playing 50% · 10:00 / 20:00',
+      );
+      expect(playing, isNotNull);
+      expect(playing!.stage, PlaybackStage.playing);
+      expect(playing.percent, closeTo(0.5, 0.001));
+    });
+
     test('returns null for unrelated stderr', () {
       expect(parsePlaybackStatus('mpv: some diagnostic'), isNull);
     });

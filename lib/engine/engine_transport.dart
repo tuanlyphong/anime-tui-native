@@ -19,6 +19,10 @@ class EngineRun {
   final EngineCommand command;
 
   /// Decoded, line-split output. Empty lines are filtered by the client.
+  ///
+  /// Production runs expose these as broadcast streams, so more than one
+  /// listener is allowed. Broadcast streams do not replay lines emitted
+  /// before the first listener attaches: listen promptly after [start].
   final Stream<String> stdout;
   final Stream<String> stderr;
   final Future<int> exitCode;

@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:anime_tui_native/core/errors/engine_exception.dart';
 import 'package:anime_tui_native/core/logging/app_logger.dart';
 import 'package:anime_tui_native/engine/engine_client.dart';
@@ -121,6 +123,24 @@ void main() {
         throwsArgumentError,
       );
     });
+
+    test('history import sends a temporary JSON file to the engine', () async {
+      final transport = FakeTransport();
+      await client(transport).importHistory(const <HistoryEntry>[
+        HistoryEntry(
+          title: 'Naruto',
+          url: 'https://example.com/naruto',
+          poster: '',
+          latestEpisode: 'Tập 1',
+          completed: false,
+        ),
+      ]);
+
+      final command = transport.commands.single;
+      expect(command.kind, EngineCommandKind.historyImport);
+      expect(command.arguments.first, 'history-import');
+      expect(command.arguments.last, endsWith('history-import.json'));
+    });
   });
 
   group('stream resolution', () {
@@ -181,10 +201,11 @@ void main() {
     test('builds the four positional arguments and streams status', () async {
       final transport = FakeTransport(replies: <EngineCommandKind, FakeReply>{
         EngineCommandKind.playEpisode: const FakeReply(
-          stdout: <String>['finished'],
+          stdout: <String>[],
           stderr: <String>[
             'Preparing Naruto 10% · Resume at 01:00',
             'Playing Naruto 50% · 10:00 / 20:00',
+            'finished',
           ],
         ),
       });
@@ -218,11 +239,34 @@ void main() {
       expect(transport.commands.single.arguments, contains('1'));
     });
 
+    test('reads the outcome from stdout while status stays on stderr',
+        () async {
+      final transport = FakeTransport(replies: <EngineCommandKind, FakeReply>{
+        EngineCommandKind.playEpisode: const FakeReply(
+          stdout: <String>['finished'],
+          stderr: <String>[
+            'Preparing Naruto 10% · Resume at 01:00',
+            'Naruto playing 100% · 20:00 / 20:00',
+          ],
+        ),
+      });
+      final session = await client(transport).play(const PlaybackRequest(
+        streamUrl: 'https://cdn.example.com/a.mp4',
+        animeUrl: 'https://example.com/naruto',
+        episodeUrl: 'https://example.com/tap-1.html',
+        label: 'Naruto — Tập 1',
+      ));
+
+      final result = await session.result;
+
+      expect(result.outcome, PlaybackOutcome.finished);
+    });
+
     test('failed playback carries stderr as the error', () async {
       final transport = FakeTransport(replies: <EngineCommandKind, FakeReply>{
         EngineCommandKind.playEpisode: const FakeReply(
-          stdout: <String>['failed'],
-          stderr: <String>['mpv: could not open stream'],
+          stdout: <String>[],
+          stderr: <String>['mpv: could not open stream', 'failed'],
           exitCode: 1,
         ),
       });
@@ -255,6 +299,73 @@ void main() {
       final result = await session.result;
 
       expect(result.outcome, PlaybackOutcome.stopped);
+    });
+
+    test('rejects Abyss streams without a configured jar', () async {
+      final transport = FakeTransport();
+      final engine = EngineClient(
+        transport: transport,
+        config: EngineConfig(
+          nodeExecutable: 'node',
+          scriptPath: '/tmp/anime.js',
+          workingDirectory: '/tmp',
+          networkTimeout: const Duration(seconds: 1),
+          environment: const <String, String>{
+            'ABYSS_DL_JAR': '/nonexistent/abyss-dl.jar'
+          },
+        ),
+        logger: AppLogger(maxEntries: 50),
+      );
+
+      await expectLater(
+        engine.play(const PlaybackRequest(
+          streamUrl: 'https://abyssplayer.com/c7vFinecq',
+          animeUrl: 'https://example.com/naruto',
+          episodeUrl: 'https://example.com/tap-1.html',
+          label: 'Naruto — Tập 1',
+        )),
+        throwsA(isA<EngineException>()
+            .having((e) => e.kind, 'kind', EngineErrorKind.notConfigured)
+            .having((e) => e.message, 'message', contains('abyss'))),
+      );
+      expect(transport.commands, isEmpty);
+    });
+
+    test('rejects Abyss playback on a Java 17 runtime with a clear error',
+        () async {
+      final directory =
+          Directory.systemTemp.createTempSync('anime-client-test-');
+      addTearDown(() => directory.deleteSync(recursive: true));
+      final jar = File('${directory.path}/abyss-dl.jar')..writeAsStringSync('');
+
+      final transport = FakeTransport();
+      final engine = EngineClient(
+        transport: transport,
+        config: EngineConfig(
+          nodeExecutable: 'node',
+          scriptPath: '/tmp/anime.js',
+          workingDirectory: '/tmp',
+          networkTimeout: const Duration(seconds: 1),
+          environment: <String, String>{'ABYSS_DL_JAR': jar.path},
+          javaExecutable: '/usr/bin/java',
+          javaVersion: '17.0.21',
+          javaMajorVersion: 17,
+        ),
+        logger: AppLogger(maxEntries: 50),
+      );
+
+      await expectLater(
+        engine.play(const PlaybackRequest(
+          streamUrl: 'https://abyssplayer.com/c7vFinecq',
+          animeUrl: 'https://example.com/naruto',
+          episodeUrl: 'https://example.com/tap-1.html',
+          label: 'Naruto — Tập 1',
+        )),
+        throwsA(isA<EngineException>()
+            .having((e) => e.kind, 'kind', EngineErrorKind.notConfigured)
+            .having((e) => e.message, 'message', contains('Java 21+'))),
+      );
+      expect(transport.commands, isEmpty);
     });
   });
 }

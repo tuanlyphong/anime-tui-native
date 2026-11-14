@@ -64,9 +64,10 @@ class Episode {
     return number.length > 3 ? number : number.padLeft(2, '0');
   }
 
-  /// True when the engine decorated this row with resume information.
+  /// True when the engine decorated this row with resume information, or
+  /// marked it as the next episode to continue from.
   bool get hasProgress =>
-      title.contains('· Resume') || title.contains('Watched');
+      preferred || title.contains('· Resume') || title.contains('Watched');
 
   @override
   bool operator ==(Object other) =>
@@ -179,19 +180,30 @@ class EngineHealth {
     required this.ready,
     required this.message,
     this.nodeVersion,
+    this.javaVersion,
     this.enginePath = '',
   });
 
   factory EngineHealth.ready({
     required String nodeVersion,
     required String enginePath,
-  }) =>
-      EngineHealth(
-        ready: true,
-        message: 'Engine ready · Node $nodeVersion',
-        nodeVersion: nodeVersion,
-        enginePath: enginePath,
-      );
+    String? javaVersion,
+    String? warning,
+  }) {
+    final parts = <String>[
+      'Engine ready',
+      'Node $nodeVersion',
+      if (javaVersion != null) 'Java $javaVersion',
+      if (warning != null) warning,
+    ];
+    return EngineHealth(
+      ready: true,
+      message: parts.join(' · '),
+      nodeVersion: nodeVersion,
+      javaVersion: javaVersion,
+      enginePath: enginePath,
+    );
+  }
 
   factory EngineHealth.unavailable(String message, {String enginePath = ''}) =>
       EngineHealth(ready: false, message: message, enginePath: enginePath);
@@ -199,5 +211,6 @@ class EngineHealth {
   final bool ready;
   final String message;
   final String? nodeVersion;
+  final String? javaVersion;
   final String enginePath;
 }

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:anime_tui_native/core/errors/engine_exception.dart';
 import 'package:anime_tui_native/core/logging/app_logger.dart';
@@ -68,5 +69,41 @@ void main() {
 
     expect(controller.hasLoaded(completed: false), isFalse);
     expect(controller.entries(completed: false), isEmpty);
+  });
+
+  test('imports history through the engine so it survives a reload', () async {
+    await controller.load(completed: false);
+    const importedUrl = 'https://example.com/phim/one-piece';
+
+    final result = await controller.importHistoryContent(jsonEncode(
+      <Map<String, Object?>>[
+        <String, Object?>{
+          'title': 'One Piece',
+          'url': importedUrl,
+          'poster': '',
+          'latestEpisode': 'Tập 10',
+          'completed': false,
+        },
+      ],
+    ));
+
+    expect(result.imported, 1);
+    expect(engine.historyImports.single.single.url, importedUrl);
+    expect(
+      controller.entries(completed: false).map((entry) => entry.url),
+      contains(importedUrl),
+    );
+
+    // A fresh controller reads from the same engine store, like a relaunch.
+    final reopened = HistoryController(
+      engine: engine,
+      logger: AppLogger(maxEntries: 50),
+    );
+    await reopened.load(completed: false);
+    expect(
+      reopened.entries(completed: false).map((entry) => entry.url),
+      contains(importedUrl),
+    );
+    reopened.dispose();
   });
 }

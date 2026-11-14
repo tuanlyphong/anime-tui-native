@@ -1,11 +1,15 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
+import '../app/app_settings.dart';
 import '../core/errors/engine_exception.dart';
 import '../core/logging/app_logger.dart';
 import '../core/utils/async_semaphore.dart';
 import 'engine_command.dart';
 import 'engine_config.dart';
 import 'engine_transport.dart';
+import 'java_runtime.dart';
 import 'models.dart';
 import 'parsers.dart';
 
@@ -49,6 +53,10 @@ abstract interface class AnimeEngine {
   });
 
   Future<void> setCompleted(String url, {required bool completed});
+
+  /// Merge [entries] into the engine's on-disk history. Imported entries take
+  /// precedence over local ones with the same URL.
+  Future<void> importHistory(List<HistoryEntry> entries);
 
   Future<EngineHealth> checkHealth();
 
@@ -116,12 +124,76 @@ class EngineClient implements AnimeEngine {
 
   @override
   Future<PlaybackSession> play(PlaybackRequest request) async {
+    var jar = (config.environment['ABYSS_DL_JAR'] ?? '').trim();
+    if (jar.isEmpty) {
+      jar = AppSettings.discoverAbyssJarPath();
+    }
+    // The `streams` command only yields Abyss page URLs, which mpv cannot
+    // play directly. Without the abyss-dl.jar downloader the engine falls
+    // back to direct mpv on an HTML page and ends almost immediately as
+    // "stopped". Fail fast with an actionable error instead of silently
+    // spawning a doomed playback process.
+    final isAbyss =
+        RegExp(r'abyssplayer\.com/([^/?#]+)').hasMatch(request.streamUrl);
+    if (isAbyss) {
+      if (jar.isEmpty) {
+        throw EngineException(
+          EngineErrorKind.notConfigured,
+          'Abyss streams need the abyss-dl.jar downloader, but none is '
+          'configured. Set the abyss-dl.jar path in Settings or set the '
+          'ABYSS_DL_JAR environment variable.',
+          command: 'play',
+        );
+      }
+      if (!File(jar).existsSync()) {
+        throw EngineException(
+          EngineErrorKind.notConfigured,
+          'The abyss-dl.jar downloader was not found at $jar.',
+          details: 'Set the abyss-dl.jar path in Settings or the '
+              'ABYSS_DL_JAR environment variable.',
+          command: 'play',
+        );
+      }
+
+      // abyss-dl.jar is compiled for Java 21 (class file 65). Validate the
+      // runtime here so the user sees an actionable message instead of
+      // `UnsupportedClassVersionError` buried in the engine's stderr.
+      final java =
+          config.javaMajorVersion != null && config.javaExecutable != null
+              ? JavaRuntime(
+                  home: config.javaHome ?? '',
+                  executable: config.javaExecutable!,
+                  version: config.javaVersion ?? '${config.javaMajorVersion}',
+                  majorVersion: config.javaMajorVersion!,
+                )
+              : JavaRuntime.discover();
+      if (java == null) {
+        throw EngineException(
+          EngineErrorKind.notConfigured,
+          'abyss-dl.jar requires Java 21+, but no compatible Java runtime was '
+          'found. Install Java 21 or point JAVA_HOME / ANIME_TUI_JAVA_HOME at '
+          'a Java 21+ JDK.',
+          command: 'play',
+        );
+      }
+      if (java.majorVersion < JavaRuntime.minimumMajorVersion) {
+        throw EngineException(
+          EngineErrorKind.notConfigured,
+          'abyss-dl.jar requires Java 21+, but the selected runtime is Java '
+          '${java.majorVersion} (${java.executable}). Point JAVA_HOME or '
+          'ANIME_TUI_JAVA_HOME at a Java 21+ JDK.',
+          details: 'Detected Java ${java.version} at ${java.executable}.',
+          command: 'play',
+        );
+      }
+    }
+
     final command = EngineCommand.playEpisode(
       request,
       player: config.environment['PLAYER'] ?? 'mpv',
       progressive: config.environment['ABYSS_PROGRESSIVE'] != '0',
       quality: config.environment['ABYSS_QUALITY'] ?? 'h',
-      jar: config.environment['ABYSS_DL_JAR'] ?? '',
+      jar: jar,
     );
 
     final run = await transport.start(command);
@@ -170,14 +242,20 @@ class EngineClient implements AnimeEngine {
       await stdoutSub.cancel();
       await stderrSub.cancel();
 
+      // anime.js prints the outcome (`finished`/`stopped`/`failed`) on
+      // stdout; stderr carries the live status lines. Prefer stdout, then fall
+      // back to stderr for older engine builds, and finally treat a killed
+      // process as an intentional stop rather than a protocol error.
       PlaybackOutcome outcome;
       try {
         outcome = parsePlaybackOutcome(stdoutLines);
       } on EngineException {
-        // A killed process often has no stdout. Treat that as an intentional
-        // stop rather than a confusing protocol error.
-        outcome =
-            stopRequested ? PlaybackOutcome.stopped : PlaybackOutcome.failed;
+        try {
+          outcome = parsePlaybackOutcome(stderrLines);
+        } on EngineException {
+          outcome =
+              stopRequested ? PlaybackOutcome.stopped : PlaybackOutcome.failed;
+        }
       }
 
       if (code != 0 && outcome == PlaybackOutcome.finished) {
@@ -267,6 +345,33 @@ class EngineClient implements AnimeEngine {
   @override
   Future<void> setCompleted(String url, {required bool completed}) async {
     await _run(EngineCommand.setCompleted(url, completed: completed));
+  }
+
+  @override
+  Future<void> importHistory(List<HistoryEntry> entries) async {
+    if (entries.isEmpty) return;
+    final directory =
+        await Directory.systemTemp.createTemp('anime-tui-history-');
+    final file = File(
+      '${directory.path}${Platform.pathSeparator}history-import.json',
+    );
+    try {
+      await file.writeAsString(
+        jsonEncode(entries.map((entry) => entry.toJson()).toList()),
+        flush: true,
+      );
+      await _run(EngineCommand.importHistory(file.path));
+      _logger.info(
+        'History import merged',
+        context: {'entries': entries.length},
+      );
+    } finally {
+      try {
+        await directory.delete(recursive: true);
+      } on Object {
+        // Temp cleanup is best effort.
+      }
+    }
   }
 
   @override

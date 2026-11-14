@@ -1,3 +1,6 @@
+# Node engine dependencies
+node_modules/
+
 # Miscellaneous
 *.class
 *.log
@@ -32,6 +35,7 @@ migrate_working_dir/
 .pub/
 /build/
 /coverage/
+/dist/
 
 # Symbolication related
 app.*.symbols

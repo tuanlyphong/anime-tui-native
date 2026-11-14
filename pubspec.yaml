@@ -1,5 +1,5 @@
 name: anime_tui_native
-description: Native, cross-platform desktop anime browser backed by the anime-tui Node.js engine.
+description: Native Flutter desktop and Android anime browser backed by the anime-tui engine and an in-app WebView.
 version: 2.0.0
 publish_to: none
 
@@ -7,8 +7,14 @@ environment:
   sdk: ">=3.3.0 <4.0.0"
 
 dependencies:
+  file_selector: ^1.1.0
   flutter:
     sdk: flutter
+  flutter_inappwebview: ^6.1.5
+  html: ^0.15.7
+  http: ^1.6.0
+  path_provider: ^2.1.6
+  url_launcher: ^6.3.3
 
 dev_dependencies:
   flutter_test:
