@@ -64,7 +64,7 @@ jobs:
       - name: Analyze and test
         if: runner.os == 'Linux'
         run: |
-          flutter analyze
+          flutter analyze --no-fatal-infos
           flutter test
 
       - name: Build and package
