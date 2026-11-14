@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -7,7 +8,34 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../core/logging/app_logger.dart';
 import '../engine/engine_client.dart';
+import '../engine/mobile/mobile_parsers.dart';
 import '../engine/models.dart';
+
+/// Build the wrapper document used by [MobilePlayerPage].
+///
+/// Some stream hosts refuse to run when opened top-level and replace the page
+/// with "Video chỉ có thể phát trong iframe." Embedding the stream reproduces
+/// the site's own player context, where the host allows playback.
+@visibleForTesting
+String buildMobilePlayerDocument(String streamUrl) {
+  final src = const HtmlEscape(HtmlEscapeMode.attribute).convert(streamUrl);
+  return '''
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
+    iframe { position: fixed; inset: 0; width: 100%; height: 100%; border: 0; }
+  </style>
+</head>
+<body>
+  <iframe src="$src" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen></iframe>
+</body>
+</html>
+''';
+}
 
 /// Open the mobile player as a [PlaybackSession].
 ///
@@ -92,6 +120,19 @@ class _MobilePlayerPageState extends State<MobilePlayerPage> {
 
   String get _url => widget.request.streamUrl;
 
+  /// Episode page used as the wrapper's base URL and browser fallback.
+  ///
+  /// The player expects to be embedded by the episode page, so this also gives
+  /// the iframe request a sensible referrer instead of the stream URL itself.
+  String? get _episodePageUrl {
+    final raw = widget.request.episodeUrl.trim();
+    if (raw.isEmpty) return null;
+    final uri = Uri.tryParse(raw);
+    if (uri == null) return null;
+    if (uri.scheme == 'http' || uri.scheme == 'https') return uri.toString();
+    return mobileEpisodePageUrl(raw).toString();
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -133,7 +174,12 @@ class _MobilePlayerPageState extends State<MobilePlayerPage> {
         child: Stack(
           children: [
             InAppWebView(
-              initialUrlRequest: URLRequest(url: WebUri(_url)),
+              initialData: InAppWebViewInitialData(
+                data: buildMobilePlayerDocument(_url),
+                mimeType: 'text/html',
+                encoding: 'utf-8',
+                baseUrl: WebUri(_episodePageUrl ?? _url),
+              ),
               initialSettings: InAppWebViewSettings(
                 javaScriptEnabled: true,
                 domStorageEnabled: true,
@@ -277,7 +323,7 @@ class _MobilePlayerPageState extends State<MobilePlayerPage> {
   }
 
   Future<void> _openExternal() async {
-    final uri = Uri.tryParse(_url);
+    final uri = Uri.tryParse(_episodePageUrl ?? _url);
     if (uri == null) return;
     final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
     if (!launched && mounted) {
