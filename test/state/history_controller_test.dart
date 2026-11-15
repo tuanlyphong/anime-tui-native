@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:anime_tui_native/core/errors/engine_exception.dart';
 import 'package:anime_tui_native/core/logging/app_logger.dart';
+import 'package:anime_tui_native/engine/models.dart';
 import 'package:anime_tui_native/state/history_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -69,6 +70,37 @@ void main() {
 
     expect(controller.hasLoaded(completed: false), isFalse);
     expect(controller.entries(completed: false), isEmpty);
+  });
+
+  test('exportJson includes both in-progress and completed entries', () async {
+    const inProgressEntry = HistoryEntry(
+      title: 'Naruto',
+      url: 'https://example.com/phim/naruto',
+      poster: '',
+      latestEpisode: 'Tập 1',
+      completed: false,
+    );
+    const completedEntry = HistoryEntry(
+      title: 'One Piece',
+      url: 'https://example.com/phim/one-piece',
+      poster: '',
+      latestEpisode: 'Tập 10',
+      completed: true,
+    );
+    controller.updateEngine(FakeEngine(
+      inProgress: <HistoryEntry>[inProgressEntry],
+      completed: <HistoryEntry>[completedEntry],
+    ));
+
+    // Only one tab is loaded, like a user exporting from "Continue watching".
+    await controller.load(completed: false);
+    final decoded = jsonDecode(await controller.exportJson()) as List<dynamic>;
+
+    expect(decoded, hasLength(2));
+    expect(
+      decoded.map((item) => (item as Map<String, dynamic>)['url']),
+      containsAll(<String>[inProgressEntry.url, completedEntry.url]),
+    );
   });
 
   test('imports history through the engine so it survives a reload', () async {

@@ -116,6 +116,9 @@ void main() {
     expect(find.byType(AppSidebar), findsNothing);
     expect(find.text('Search results'), findsOneWidget);
     expect(find.text('No active playback'), findsNothing);
+    expect(find.byIcon(Icons.info_outline), findsNothing);
+    expect(find.text('Logs'), findsNothing);
+    expect(find.byType(NavigationDestination), findsNWidgets(3));
 
     await tester.tap(find.text('Continue'));
     await tester.pumpAndSettle();

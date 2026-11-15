@@ -20,10 +20,10 @@ engine and requires none of the desktop tooling.
 |---|---|
 | **Search** | Search anime titles; results cached by the engine |
 | **Watch history** | Continue-watching & completed tabs; mark complete/incomplete |
-| **Playback** | Desktop: streams resolve, then `mpv` opens. Android: full-screen in-app WebView player with a browser fallback |
-| **Logs** | Every command, duration, error, and playback event |
-| **Settings** | Desktop: engine path, Node executable, player, proxy, timeouts. Android: built-in engine info and storage paths |
-| **Keyboard shortcuts** | Desktop only: `Ctrl+F` search, `Ctrl+1…4` tabs, `Ctrl+R` refresh |
+| **History backup** | Import JSON history, export to a chosen folder, or share the file with apps such as Gmail and Messenger |
+| **Playback** | Desktop: streams resolve, then `mpv` opens. Android: full-screen in-app WebView player with a browser fallback and pause-ad blocking |
+| **Settings** | Desktop: engine path, Node executable, player, proxy, timeouts. Android: built-in engine, no setup required |
+| **Keyboard shortcuts** | Desktop only: `Ctrl+F` search, `Ctrl+1…3` tabs, `Ctrl+R` refresh |
 | **Mobile UI** | Bottom navigation, Android back handling, compact history cards |
 
 ## Quick Start
@@ -189,10 +189,10 @@ Android implements the same `AnimeEngine` interface directly:
 | Desktop: Abyss playback says Java 21+ is missing | Install a Java 21+ JDK; the app auto-detects Windows, macOS, and Linux locations |
 | Desktop: playback fails immediately | Confirm `mpv` is in `PATH` |
 | Desktop: episodes/streams fail to launch a browser | Install Chromium/Chrome, or run `npx playwright install chromium` once |
-| Windows playback leaves a player running | The app uses `taskkill /T` to stop the engine's child process tree; check Logs for the termination result |
-| Search/episode timeouts | Check Logs, adjust network timeout or `ANIME_TUI_PROXY` |
+| Windows playback leaves a player running | The app uses `taskkill /T` to stop the engine's child process tree; the app log records the termination result |
+| Search/episode timeouts | Check the app log, adjust network timeout or `ANIME_TUI_PROXY` |
 | Android: Cloudflare challenge or "just a moment" | Turn off VPN/proxy, wait for the WebView challenge to clear, or try another network. Cookie clearance is shared between operations. |
-| Android: video does not play | Tap the external-browser fallback in the player if the embedded player is blocked; check Logs for WebView network errors. |
+| Android: video does not play | Tap the external-browser fallback in the player if the embedded player is blocked; the app log records WebView network errors |
 | Android: APK will not install | Allow installs from the source app, confirm Android 7.0+, and uninstall an older copy signed with a different key. |
 | Android build: missing SDK/NDK | Install platform 36 and NDK 28.2.13676358; Gradle can also auto-install them after accepting SDK licenses. |
 

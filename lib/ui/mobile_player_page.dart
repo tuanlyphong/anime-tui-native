@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -36,6 +37,126 @@ String buildMobilePlayerDocument(String streamUrl) {
 </html>
 ''';
 }
+
+/// Script injected into every frame of the player WebView.
+///
+/// The stream host embeds its advertising configuration in the page and turns
+/// it into a clickable overlay when playback pauses. Deleting `pauseAd` while
+/// the configuration is parsed prevents that overlay from being created. The
+/// DOM scrub is a fallback for players that build the overlay another way.
+@visibleForTesting
+String buildMobilePlayerAdBlockScript() => r'''
+(function () {
+  if (window.__animeTuiAdBlockInstalled) return;
+  window.__animeTuiAdBlockInstalled = true;
+
+  // Player code: JSON.parse(atob(adsConfig)). Strip the pause ad before it is
+  // ever handed to the player UI.
+  try {
+    var originalParse = JSON.parse;
+    JSON.parse = function (text, reviver) {
+      var value = originalParse.call(JSON, text, reviver);
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        try { delete value.pauseAd; } catch (error) {}
+        if (value.pauseAd) value.pauseAd = null;
+      }
+      return value;
+    };
+  } catch (error) {}
+
+  var AD_SELECTOR = [
+    'a[href*="adqc.net"]',
+    'a[href*="bom88."]',
+    'img[src*="lh3.googleusercontent.com"]',
+    '[class*="pause-ad"]',
+    '[class*="pauseAd"]',
+    '[id*="pause-ad"]',
+    '[id*="pauseAd"]'
+  ].join(',');
+
+  function isAdNode(node) {
+    if (!node || node.nodeType !== 1) return false;
+    if (node.matches && node.matches(AD_SELECTOR)) return true;
+    return false;
+  }
+
+  function removeNode(node) {
+    var parent = node.parentElement;
+    try {
+      node.remove();
+    } catch (error) {
+      node.style.display = 'none';
+    }
+    // Drop an empty wrapper left behind by the removed ad markup.
+    if (parent && parent !== document.body &&
+        parent !== document.documentElement &&
+        parent.childElementCount === 0 &&
+        (parent.textContent || '').trim() === '') {
+      try { parent.remove(); } catch (error) {}
+    }
+  }
+
+  function scrub(root) {
+    if (!root || !root.querySelectorAll) return;
+    var nodes = root.querySelectorAll(AD_SELECTOR);
+    for (var i = nodes.length - 1; i >= 0; i--) removeNode(nodes[i]);
+  }
+
+  function start() {
+    scrub(document);
+    var observer = new MutationObserver(function (mutations) {
+      for (var i = 0; i < mutations.length; i++) {
+        var added = mutations[i].addedNodes;
+        for (var j = 0; j < added.length; j++) {
+          var node = added[j];
+          if (node.nodeType !== 1) continue;
+          if (isAdNode(node)) {
+            removeNode(node);
+          } else {
+            scrub(node);
+          }
+        }
+      }
+    });
+    observer.observe(document.documentElement || document, {
+      childList: true,
+      subtree: true
+    });
+  }
+
+  if (document.documentElement) {
+    start();
+  } else {
+    document.addEventListener('DOMContentLoaded', start, {once: true});
+  }
+
+  // Never navigate to the ad landing page if a click slips through first.
+  document.addEventListener('click', function (event) {
+    var anchor = event.target && event.target.closest
+      ? event.target.closest('a[href]')
+      : null;
+    if (!anchor) return;
+    var href = anchor.getAttribute('href') || '';
+    if (href.indexOf('adqc.net') !== -1 || href.indexOf('bom88.') !== -1) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }, true);
+})();
+''';
+
+/// User scripts installed in the player WebView.
+///
+/// Player documents embed their video in a cross-origin iframe, so the ad
+/// script has to run in every frame (`forMainFrameOnly: false`).
+@visibleForTesting
+List<UserScript> buildMobilePlayerUserScripts() => <UserScript>[
+      UserScript(
+        source: buildMobilePlayerAdBlockScript(),
+        injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+        forMainFrameOnly: false,
+      ),
+    ];
 
 /// Open the mobile player as a [PlaybackSession].
 ///
@@ -179,6 +300,9 @@ class _MobilePlayerPageState extends State<MobilePlayerPage> {
                 mimeType: 'text/html',
                 encoding: 'utf-8',
                 baseUrl: WebUri(_episodePageUrl ?? _url),
+              ),
+              initialUserScripts: UnmodifiableListView<UserScript>(
+                buildMobilePlayerUserScripts(),
               ),
               initialSettings: InAppWebViewSettings(
                 javaScriptEnabled: true,

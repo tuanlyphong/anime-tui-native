@@ -1,12 +1,15 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
+import '../core/history_export.dart';
 import '../engine/models.dart';
 import '../state/history_controller.dart';
-import '../core/utils/app_paths.dart';
 import 'widgets/common.dart';
+
+enum _ExportAction { save, share }
 
 class HistoryPage extends StatefulWidget {
   const HistoryPage({
@@ -144,39 +147,78 @@ class _HistoryPageState extends State<HistoryPage> {
   }
 
   Future<void> _export(BuildContext context) async {
-    final result = await showDialog<String>(
+    final action = await showDialog<_ExportAction>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Export history'),
-        content: const Text(
-            'Save the exported file to another device (USB, email, etc.)'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Save the history file to a folder on this device, or share it '
+              'with another app.',
+            ),
+            const SizedBox(height: 12),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.folder_outlined),
+              title: const Text('Save to folder'),
+              subtitle: const Text('Choose a folder and file name'),
+              onTap: () => Navigator.of(context).pop(_ExportAction.save),
+            ),
+            if (Platform.isAndroid)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.share_outlined),
+                title: const Text('Share with apps'),
+                subtitle: const Text('Gmail, Messenger, Drive, and more'),
+                onTap: () => Navigator.of(context).pop(_ExportAction.share),
+              ),
+          ],
+        ),
         actions: [
-          OutlinedButton(
-            onPressed: () => Navigator.of(context).pop(null),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
             child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(AppPaths.historyFile),
-            child: const Text('Save to Downloads'),
           ),
         ],
       ),
     );
-    if (result == null) return;
-    final success = await widget.history.exportHistory(result);
-    if (success) {
+    if (action == null || !context.mounted) return;
+
+    String data;
+    try {
+      data = await widget.history.exportJson();
+    } on Object catch (error) {
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('History exported to $result'),
-        duration: Duration(seconds: 2),
-      ));
-    } else {
+      _showMessage(context, 'Could not build the history file: $error');
+      return;
+    }
+    if (!context.mounted) return;
+
+    if (action == _ExportAction.share) {
+      try {
+        final shared = await HistoryExport.shareJson(data);
+        if (!context.mounted || !shared) return;
+        _showMessage(context, 'History shared.');
+      } on Object catch (error) {
+        if (!context.mounted) return;
+        _showMessage(context, 'Could not share history: $error');
+      }
+      return;
+    }
+
+    try {
+      final location = await HistoryExport.saveJson(data);
+      if (location == null || !context.mounted) return;
+      _showMessage(
+        context,
+        'History exported to ${HistoryExport.describeLocation(location)}',
+      );
+    } on Object catch (error) {
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: const Text('Failed to export history'),
-        backgroundColor: Colors.red,
-        duration: Duration(seconds: 2),
-      ));
+      _showMessage(context, 'Could not export history: $error');
     }
   }
 

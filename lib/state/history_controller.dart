@@ -139,6 +139,24 @@ class HistoryController extends ChangeNotifier {
     await HistoryPersistence.save(all);
   }
 
+  /// Build the JSON payload used by the export/share actions.
+  ///
+  /// Both lists are loaded first so exporting from the "Continue watching"
+  /// tab still includes completed titles.
+  Future<String> exportJson() async {
+    await load(completed: false);
+    await load(completed: true);
+    final byUrl = <String, HistoryEntry>{};
+    for (final entries in _entries.values) {
+      for (final entry in entries) {
+        if (entry.url.isNotEmpty) byUrl[entry.url] = entry;
+      }
+    }
+    return jsonEncode(
+      byUrl.values.map((entry) => entry.toJson()).toList(),
+    );
+  }
+
   /// Export history to a file (user can share it with another device).
   Future<bool> exportHistory(String path) async {
     final all = <HistoryEntry>[];

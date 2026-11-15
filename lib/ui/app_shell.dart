@@ -5,13 +5,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../app/app_scope.dart';
-import '../core/logging/app_logger.dart';
 import '../engine/models.dart';
 import '../state/app_controller.dart';
 import '../state/playback_controller.dart';
 import 'chrome.dart';
 import 'history_page.dart';
-import 'logs_page.dart';
 import 'mobile_info_dialog.dart';
 import 'mobile_player_page.dart';
 import 'search_page.dart';
@@ -121,9 +119,6 @@ class _AppShellState extends State<AppShell> {
       listenable: controller,
       builder: (context, _) {
         final wide = _isWide;
-        final errorCount = controller.logger.entries
-            .where((entry) => entry.level == LogLevel.error)
-            .length;
 
         return PopScope(
           canPop:
@@ -146,16 +141,13 @@ class _AppShellState extends State<AppShell> {
                   () => _select(1, controller),
               const SingleActivator(LogicalKeyboardKey.digit3, control: true):
                   () => _select(2, controller),
-              const SingleActivator(LogicalKeyboardKey.digit4, control: true):
-                  () => _select(3, controller),
               const SingleActivator(LogicalKeyboardKey.comma, control: true):
                   () => unawaited(_openSettings(controller)),
             },
             child: Focus(
               autofocus: wide,
-              child: wide
-                  ? _buildDesktop(controller, errorCount)
-                  : _buildMobile(controller),
+              child:
+                  wide ? _buildDesktop(controller) : _buildMobile(controller),
             ),
           ),
         );
@@ -163,7 +155,7 @@ class _AppShellState extends State<AppShell> {
     );
   }
 
-  Widget _buildDesktop(AppController controller, int errorCount) {
+  Widget _buildDesktop(AppController controller) {
     return Scaffold(
       body: Column(
         children: [
@@ -175,7 +167,6 @@ class _AppShellState extends State<AppShell> {
                   extended: MediaQuery.sizeOf(context).width >= 1050,
                   onSelect: (index) => _select(index, controller),
                   onSettings: () => unawaited(_openSettings(controller)),
-                  errorCount: errorCount,
                   engineReady: controller.health?.ready == true,
                 ),
                 const VerticalDivider(width: 1),
@@ -201,7 +192,6 @@ class _AppShellState extends State<AppShell> {
           ),
           PlaybackBar(
             playback: controller.playback,
-            onOpenLogs: () => _select(3, controller),
           ),
           AppStatusBar(
             health: controller.health,
@@ -253,11 +243,6 @@ class _AppShellState extends State<AppShell> {
             onPressed: () => _refresh(controller),
             icon: const Icon(Icons.refresh),
           ),
-          IconButton(
-            tooltip: 'About and storage',
-            onPressed: () => unawaited(_openSettings(controller)),
-            icon: const Icon(Icons.info_outline),
-          ),
           const SizedBox(width: 4),
         ],
       ),
@@ -277,7 +262,6 @@ class _AppShellState extends State<AppShell> {
             builder: (context, _) => controller.playback.isActive
                 ? PlaybackBar(
                     playback: controller.playback,
-                    onOpenLogs: () => _select(3, controller),
                   )
                 : const SizedBox.shrink(),
           ),
@@ -320,7 +304,6 @@ class _AppShellState extends State<AppShell> {
           active: _index == 2,
           onOpenAnime: (anime) => _openAnime(anime, controller),
         ),
-        LogsPage(logger: controller.logger),
       ],
     );
   }

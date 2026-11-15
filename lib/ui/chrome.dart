@@ -14,7 +14,6 @@ class AppSidebar extends StatelessWidget {
     required this.extended,
     required this.onSelect,
     required this.onSettings,
-    required this.errorCount,
     required this.engineReady,
   });
 
@@ -22,14 +21,12 @@ class AppSidebar extends StatelessWidget {
   final bool extended;
   final ValueChanged<int> onSelect;
   final VoidCallback onSettings;
-  final int errorCount;
   final bool engineReady;
 
   static const items = <({IconData icon, String label})>[
     (icon: Icons.search, label: 'Search'),
     (icon: Icons.play_circle_outline, label: 'Continue'),
     (icon: Icons.task_alt, label: 'Completed'),
-    (icon: Icons.terminal, label: 'Logs'),
   ];
 
   @override
@@ -104,7 +101,6 @@ class AppSidebar extends StatelessWidget {
               label: items[i].label,
               selected: index == i,
               extended: extended,
-              badge: i == 3 && errorCount > 0 ? errorCount : null,
               onTap: () => onSelect(i),
             ),
           const Spacer(),
@@ -180,7 +176,6 @@ class _SidebarItem extends StatelessWidget {
     required this.selected,
     required this.extended,
     required this.onTap,
-    this.badge,
   });
 
   final IconData icon;
@@ -188,7 +183,6 @@ class _SidebarItem extends StatelessWidget {
   final bool selected;
   final bool extended;
   final VoidCallback onTap;
-  final int? badge;
 
   @override
   Widget build(BuildContext context) {
@@ -229,25 +223,6 @@ class _SidebarItem extends StatelessWidget {
                       ),
                     ),
                   ),
-                  if (badge != null)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 1,
-                      ),
-                      decoration: BoxDecoration(
-                        color: scheme.error.withValues(alpha: 0.18),
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                      child: Text(
-                        '$badge',
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
-                          color: scheme.error,
-                        ),
-                      ),
-                    ),
                 ],
               ],
             ),
@@ -265,11 +240,9 @@ class PlaybackBar extends StatelessWidget {
   const PlaybackBar({
     super.key,
     required this.playback,
-    required this.onOpenLogs,
   });
 
   final PlaybackController playback;
-  final VoidCallback onOpenLogs;
 
   @override
   Widget build(BuildContext context) {
@@ -396,11 +369,6 @@ class PlaybackBar extends StatelessWidget {
               ),
               const SizedBox(width: 12),
               if (failed) ...[
-                TextButton.icon(
-                  onPressed: onOpenLogs,
-                  icon: const Icon(Icons.terminal, size: 16),
-                  label: const Text('Logs'),
-                ),
                 IconButton(
                   tooltip: 'Dismiss',
                   onPressed: playback.dismiss,
@@ -508,7 +476,7 @@ class AppStatusBar extends StatelessWidget {
           ],
           const Spacer(),
           Text(
-            'Ctrl+F search · Ctrl+R refresh · Ctrl+1–4 navigate',
+            'Ctrl+F search · Ctrl+R refresh · Ctrl+1–3 navigate',
             style: TextStyle(
               fontSize: 10.5,
               color: scheme.onSurfaceVariant.withValues(alpha: 0.8),
